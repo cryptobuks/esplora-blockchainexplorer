@@ -1,13 +1,13 @@
 FROM blockstream/esplora-base:latest AS build
 
-FROM debian:stretch@sha256:58a80e0b6aa4d960ee2a5452b0230c406c47ed30a66555ba753c8e1710a434f5
+FROM debian:stretch@sha256:724b0fbbda7fda6372ffed586670573c59e07a48c86d606bab05db118abe0ef5
 
 COPY --from=build /srv/explorer /srv/explorer
 COPY --from=build /root/.nvm /root/.nvm
 
 RUN apt-get -yqq update \
  && apt-get -yqq upgrade \
- && apt-get -yqq install nginx supervisor tor git curl pkg-config libcairo2-dev libjpeg-dev libgif-dev build-essential libpixman-1-dev
+ && apt-get -yqq install nginx tor git curl pkg-config libcairo2-dev libjpeg-dev libgif-dev build-essential libpixman-1-dev runit python procps
 
 RUN mkdir -p /srv/explorer/static
 
@@ -37,7 +37,7 @@ RUN source /root/.nvm/nvm.sh \
     npm run dist -- liquid-mainnet blockstream
 
 # configuration
-RUN cp /srv/explorer/source/contrib/*.conf.in /srv/explorer/source/contrib/*torrc /srv/explorer/source/run.sh /srv/explorer/source/cli.sh.in /srv/explorer/
+RUN cp /srv/explorer/source/run.sh /srv/explorer/
 
 # cleanup
 RUN apt-get --auto-remove remove -yqq --purge manpages git curl \

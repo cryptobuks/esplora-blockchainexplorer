@@ -1,6 +1,6 @@
 import Snabbdom from 'snabbdom-pragma'
 import { getMempoolDepth, squashFeeHistogram, feerateCutoff } from '../lib/fees'
-import { formatAmount, formatVMB } from './util'
+import { formatSat, formatVMB } from './util'
 import layout from './layout'
 import search from './search'
 
@@ -21,7 +21,7 @@ export default ({ t, mempool, feeEst, ...S }) => mempool && feeEst && layout(
           </div>
           <div>
             <div>{t`Total fees`}</div>
-            <div>{formatAmount({ value: mempool.total_fee })}</div>
+            <div>{formatSat(mempool.total_fee)}</div>
           </div>
           <div>
             <div>{t`Total size`}</div>
@@ -38,7 +38,7 @@ export default ({ t, mempool, feeEst, ...S }) => mempool && feeEst && layout(
             { squashed = squashFeeHistogram(mempool.fee_histogram), squashed.map(([ rangeStart, binSize ], i) => binSize > 0 &&
               <dd>
                 <span className="text">{`${rangeStart.toFixed(1)}${i == 0 ? '+' : ' - '+squashed[i-1][0].toFixed(1)}`}</span>
-                <span className="bar" style={`width: ${binSize/mempool.vsize*100}%`}>{formatVMB(binSize)}</span>
+                <span className="bar" style={{width: `${binSize/mempool.vsize*100}%`}}>{formatVMB(binSize)}</span>
               </dd>
             )}
             <span className="label">{t`sat/vbyte`}</span>

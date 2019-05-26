@@ -5,8 +5,8 @@ import vinView from './tx-vin'
 import voutView from './tx-vout'
 import privacyAnalysisView from './tx-privacy-analysis'
 import segwitGainsView from './tx-segwit-gains'
-import { formatAmount, formatTime, formatVMB, commaify } from './util'
-import { isAnyConfidential, isAnyPegout, isAllNative, isRbf, outTotal, updateQuery } from '../util'
+import { formatSat, formatTime, formatVMB, formatNumber } from './util'
+import { isAnyConfidential, isAllNative, isRbf, outTotal, updateQuery } from '../util'
 
 // show a warning for payments paying more than 1.2x the recommended amount for 2 blocks confirmation
 const OVERPAYMENT_WARN = 1.2
@@ -31,7 +31,7 @@ export default ({ t, tx, tipHeight, spends, openTx, page, ...S }) => tx && S.txA
     </div>
     <div className="container">
       {txHeader(tx, { t, tipHeight, ...S })}
-      {txBox(tx, { openTx, tipHeight, t, spends, query: page.query })}
+      {txBox(tx, { openTx, tipHeight, t, spends, query: page.query, ...S })}
     </div>
   </div>
 , { t, page, ...S })
@@ -39,8 +39,8 @@ export default ({ t, tx, tipHeight, spends, openTx, page, ...S }) => tx && S.txA
 const confirmationText = (status, tipHeight, t) =>
   !status.confirmed ? t`Unconfirmed` : tipHeight ? t`${tipHeight - status.block_height + 1} Confirmations` : t`Confirmed`
 
-export const txBox = (tx, { t, openTx, tipHeight, spends, query}) => {
-  const vopt = { isOpen: (openTx == tx.txid), query, t }
+export const txBox = (tx, { t, openTx, tipHeight, spends, query, ...S }) => {
+  const vopt = { isOpen: (openTx == tx.txid), query, t, ...S }
 
   return <div className="transaction-box" id="transaction-box">
     <div className="header">
@@ -67,8 +67,9 @@ export const txBox = (tx, { t, openTx, tipHeight, spends, query}) => {
       <div></div>
       <div>
         <span>{tx.status && confirmationText(tx.status, tipHeight, t)} {isRbf(tx) ? t`(RBF)` : ''}</span>
-        <span className="amount">{ isAnyConfidential(tx) ? t`Confidential`
-              : isAllNative(tx)       ? formatAmount({ value: outTotal(tx) })
+        <span className="amount">{
+              isAnyConfidential(tx) ? t`Confidential`
+              : isAllNative(tx)     ? formatSat(outTotal(tx))
               : ''}</span>
       </div>
     </div>
@@ -103,7 +104,7 @@ const txHeader = (tx, { tipHeight, mempool, feeEst, t
       </div>
     , <div>
         <div>{t`Block height`}</div>
-        <div>{commaify(tx.status.block_height)}</div>
+        <div>{formatNumber(tx.status.block_height)}</div>
       </div>
     , <div>
         <div>{t`Block timestamp`}</div>
@@ -114,7 +115,7 @@ const txHeader = (tx, { tipHeight, mempool, feeEst, t
     { !tx.status.confirmed && feerate != null && <div>
       <div>{t`ETA`}</div>
       <div>{confEstimate == null || mempoolDepth == null ? <span className="text-muted">{t`Loading...`}</span>
-           : confEstimate == -1 ? <span className="text-muted">{t`Currently unavailable`}</span>
+           : confEstimate == -1 ? t`unknown (${formatVMB(mempoolDepth)} from tip)`
            : t`in ${confEstimate} blocks (${formatVMB(mempoolDepth)} from tip)` }
       </div>
     </div> }
@@ -122,7 +123,7 @@ const txHeader = (tx, { tipHeight, mempool, feeEst, t
     { feerate != null && <div>
       <div>{t`Transaction fees`}</div>
       <div>
-        <span className="amount">{t`${formatAmount({ value: tx.fee })} (${feerate.toFixed(1)} sat/vB)`}</span>
+        <span className="amount">{t`${formatSat(tx.fee)} (${feerate.toFixed(1)} sat/vB)`}</span>
         { overpaying > OVERPAYMENT_WARN &&
           <p className={`text-${ overpaying > OVERPAYMENT_WARN*1.5 ? 'danger' : 'warning' } mb-0`} title={t`compared to bitcoind's suggested fee of ${feeEst[2].toFixed(1)} sat/vB for confirmation within 2 blocks`}>
             ⓘ {t`overpaying by ${Math.round((overpaying-1)*100)}%`}
@@ -133,15 +134,15 @@ const txHeader = (tx, { tipHeight, mempool, feeEst, t
 
     <div>
       <div>{t`Size`}</div>
-      <div>{`${commaify(tx.size)} B`}</div>
+      <div>{`${formatNumber(tx.size)} B`}</div>
     </div>
     <div>
       <div>{t`Virtual size`}</div>
-      <div>{`${commaify(Math.ceil(tx.weight/4))} vB`}</div>
+      <div>{`${formatNumber(Math.ceil(tx.weight/4))} vB`}</div>
     </div>
     <div>
       <div>{t`Weight units`}</div>
-      <div>{`${commaify(tx.weight)} WU`}</div>
+      <div>{`${formatNumber(tx.weight)} WU`}</div>
     </div>
     <div>
       <div>{t`Version`}</div>

@@ -1,18 +1,16 @@
 import Snabbdom from 'snabbdom-pragma'
-import { linkToParentOut, formatAmount, formatHex, linkToAddr } from './util'
+import { linkToParentOut, formatOutAmount, formatSat, formatHex, linkToAddr } from './util'
 
-const layout = (vin, desc, body, { t, index, query={} }) =>
+const layout = (vin, desc, body, { t, index, query={}, ...S }) =>
   <div class={{ vin: true, selected: !!query[`input:${index}`] }}>
     <div className="vin-header">
       <div className="vin-header-container">
         <span>{ desc }</span>
-        <span className="amount">{ vin.prevout && t(formatAmount(vin.prevout)) }</span>
+        <span className="amount">{ vin.prevout && formatOutAmount(vin.prevout, { t, ...S }) }</span>
       </div>
     </div>
     { body }
   </div>
-
-const coinbase = (vin, { t, ...S }) => layout(vin, t`Coinbase`, null, { t, ...S })
 
 const pegin = (vin, { isOpen, t, ...S }) => layout(
   vin
@@ -26,15 +24,16 @@ const pegin = (vin, { isOpen, t, ...S }) => layout(
 , { t, ...S }
 )
 
-const standard = (vin, { isOpen, t, ...S }) => layout(
-  vin
-, <a href={`tx/${vin.txid}?output:${vin.vout}`}>{`${vin.txid}:${vin.vout}`}</a>
-, isOpen && <div className="vin-body">
-    <div className="vin-body-row">
-      <div>{t`Outpoint`}</div>
-      <div className="mono"><a href={`tx/${vin.txid}?output:${vin.vout}`}>{`${vin.txid}:${vin.vout}`}</a></div>
-    </div>
+const getAssetMeta = (vin, S) => vin.issuance && vin.issuance.asset_id && S.assetMap && S.assetMap[vin.issuance.asset_id]
 
+const standard = (vin, { isOpen, t, ...S }, assetMeta=getAssetMeta(vin, S)) => layout(
+  vin
+
+, vin.is_coinbase
+    ? t`Coinbase`
+    : <a href={`tx/${vin.txid}?output:${vin.vout}`}>{`${vin.txid}:${vin.vout}`}</a>
+
+, isOpen && <div className="vin-body">
     { vin.issuance && [
 
       <div className="vin-body-row">
@@ -42,21 +41,21 @@ const standard = (vin, { isOpen, t, ...S }) => layout(
         <div>{vin.issuance.is_reissuance ? t`Reissuance` : t`New asset`}</div>
       </div>
 
+    , vin.issuance.asset_id &&
+        <div className="vin-body-row">
+          <div>{t`Issued asset id`}</div>
+          <div className="mono">{vin.issuance.asset_id}</div>
+        </div>
+
     , vin.issuance.asset_entropy &&
         <div className="vin-body-row">
-          <div>{t`Issuance entropy`}</div>
+          <div>{t`Issuance contract hash`}</div>
           <div className="mono">{vin.issuance.asset_entropy}</div>
         </div>
 
-    , vin.issuance.asset_blinding_nonce &&
-        <div className="vin-body-row">
-          <div>{t`Issuance blinding nonce`}</div>
-          <div className="mono">{vin.issuance.asset_blinding_nonce}</div>
-        </div>
-
     , <div className="vin-body-row">
-        <div>{!vin.issuance.assetamountcommitment ? t`Issuance amount` : t`Amount commitment`}</div>
-        <div>{!vin.issuance.assetamountcommitment ? formatAmount({ value: vin.issuance.assetamount, asset: '' })
+        <div>{!vin.issuance.assetamountcommitment ? t`Issued amount` : t`Amount commitment`}</div>
+        <div>{!vin.issuance.assetamountcommitment ? formatIssuedAmount(vin.issuance, { t, ...S })
                                                   : <span className="mono">{vin.issuance.assetamountcommitment}</span>}</div>
       </div>
 
@@ -65,6 +64,20 @@ const standard = (vin, { isOpen, t, ...S }) => layout(
           <div>{!vin.issuance.tokenamountcommitment ? t`Reissuance keys` : t`Reissuance commitment`}</div>
           <div>{!vin.issuance.tokenamountcommitment ? (!vin.issuance.tokenamount ? t`No reissuance` : vin.issuance.tokenamount)
                                                     : <span className="mono">{vin.issuance.tokenamountcommitment}</span>}</div>
+        </div>
+
+    , assetMeta && (([ domain, ticker, name, precision ] = assetMeta) =>
+        <div className="vin-body-row">
+          <div>{t`Asset name`}</div>
+          <div>
+            {domain} {ticker} { name ? `(${name})` : '' }
+        </div>
+        </div>)()
+
+    , vin.issuance.asset_blinding_nonce &&
+        <div className="vin-body-row">
+          <div>{t`Issuance blinding nonce`}</div>
+          <div className="mono">{vin.issuance.asset_blinding_nonce}</div>
         </div>
 
     ] }
@@ -83,6 +96,16 @@ const standard = (vin, { isOpen, t, ...S }) => layout(
     { vin.witness && <div className="vin-body-row">
       <div>{t`Witness`}</div>
       <div className="mono">{vin.witness.join(' ')}</div>
+    </div> }
+
+    { vin.inner_redeemscript_asm && <div className="vin-body-row">
+      <div>{t`P2SH redeem script`}</div>
+      <div className="mono">{vin.inner_redeemscript_asm}</div>
+    </div> }
+
+    { vin.inner_witnessscript_asm && <div className="vin-body-row">
+      <div>{t`P2WSH witness script`}</div>
+      <div className="mono">{vin.inner_witnessscript_asm}</div>
     </div> }
 
     <div className="vin-body-row">
@@ -110,7 +133,13 @@ const standard = (vin, { isOpen, t, ...S }) => layout(
 , { t, ...S }
 )
 
+const formatIssuedAmount = (issuance, S) =>
+  // look up the asset name/precision when the issued asset id is known
+  issuance.asset_id
+    ? formatOutAmount({ value: issuance.assetamount, asset: issuance.asset_id }, S, true)
+  // otherwise, use the default precision of 8
+    : formatSat(issuance.assetamount, '')
+
 export default (vin, opt) =>
-  vin.is_coinbase ? coinbase(vin, opt)
-: vin.is_pegin    ? pegin(vin, opt)
-                  : standard(vin, opt)
+  vin.is_pegin ? pegin(vin, opt)
+               : standard(vin, opt)

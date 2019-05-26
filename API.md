@@ -39,10 +39,12 @@ Available fields: `spent` (boolean), `txid` (optional), `vin` (optional) and `st
 
 Returns the spending status of all transaction outputs.
 
-### `GET /broadcast?tx=<rawtx>`
+### `POST /tx`
 
-Broadcast `<rawtx>` (the raw transaction in hex) to the network.
-Returns the `txid` on success.
+Broadcast a raw transaction to the network.
+
+The transaction should be provided as hex in the request body.
+The `txid` will be returned on success.
 
 ## Addresses
 
@@ -160,7 +162,7 @@ Example output:
   "count": 8134,
   "vsize": 3444604,
   "total_fee":29204625,
-  "fee_histogram": [[53, 102131], [38, 110990], [34, 138976], [24, 112619], [3, 246346], [2, 239701], [1, 775272]]
+  "fee_histogram": [[53.01, 102131], [38.56, 110990], [34.12, 138976], [24.34, 112619], [3.16, 246346], [2.92, 239701], [1.1, 775272]]
 }
 ```
 
@@ -205,6 +207,8 @@ For example: `{ 2: 36.183, 3: 34.841, 4: 34.841, 6: 34.841, 10: 22.164, 20: 9.69
   - `is_coinbase`
   - `scriptsig`
   - `scriptsig_asm`
+  - `inner_redeemscript_asm`
+  - `inner_witnessscript_asm`
   - `sequence`
   - `witness[]`
   - `prevout` (previous output in the same format as in `vout` below)

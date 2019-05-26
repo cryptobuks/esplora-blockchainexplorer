@@ -13,7 +13,7 @@ if (process.browser) {
 }
 
 const apiBase = (process.env.API_URL || '/api').replace(/\/+$/, '')
-    , setBase = ({ path, ...r }) => ({ ...r, url: apiBase + path })
+    , setBase = ({ path, ...r }) => ({ ...r, url: path.includes('://') ? path : apiBase + path })
 
 const reservedPaths = [ 'mempool' ]
 
@@ -56,9 +56,10 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
 
   , copy$     = click('[data-clipboard-copy]').map(d => d.clipboardCopy)
   , query$    = O.merge(searchSubmit$.map(e => e.target.querySelector('[name=q]').value), goSearch$)
-  , pushtx$   = process.browser
+  , pushtx$   = (process.browser
       ? on('form[data-do=pushtx]', 'submit', { preventDefault: true }).map(e => e.ownerTarget.querySelector('[name=tx]').value)
-      : goPush$.filter(loc => !!loc.query.tx).map(loc => loc.query.tx)
+      : goPush$.filter(loc => loc.body && loc.body.tx).map(loc => loc.body.tx)
+      ).map(hex => hex.replace(/\s+/g, ''))
 
   , moreBlocks$ = click('[data-loadmore-block-height]').map(d => ({ start_height: d.loadmoreBlockHeight }))
   , moreBTxs$   = click('[data-loadmore-txs-block]').map(d => ({ block: d.loadmoreTxsBlock, start_index: d.loadmoreTxsIndex }))
@@ -167,6 +168,13 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
       , overpaying: !tx.status.confirmed && feerate != null && feeEst && feeEst[2] != null ? feerate/feeEst[2] : null
       }))
 
+  // Asset map (elements only)
+  , assetMap$ = process.env.ASSET_MAP_URL ? reply('asset-map') : O.of({})
+
+  // The minimally required data to start rendering the UI
+  // In elements, we block rendering until the assetMap is loaded. Otherwise, we can start immediately.
+  , isReady$ = process.env.ASSET_MAP_URL ? assetMap$.mapTo(true).startWith(false) : O.of(true)
+
   // Currently visible view
   , view$ = O.merge(page$.mapTo(null)
                   , goHome$.mapTo('recentBlocks')
@@ -178,7 +186,8 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
                   , goScan$.mapTo('scan')
                   , goMempool$.mapTo('mempool')
                   , error$.mapTo('error'))
-      .combineLatest(loading$, (view, loading) => view || (loading ? 'loading' : 'notFound'))
+      .combineLatest(isReady$, loading$, (view, isReady, loading) =>
+        !isReady ? 'loading' : view || (loading ? 'loading' : 'notFound'))
 
   // Page title
   , title$ = O.merge(page$.mapTo(null)
@@ -190,7 +199,7 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
                    , goRecent$.withLatestFrom(t$, (_, t) => t`Recent transactions`))
 
   // App state
-  , state$ = combine({ t$, error$, tipHeight$, spends$
+  , state$ = combine({ t$, error$, tipHeight$, spends$, assetMap$
                      , goHome$, blocks$, nextBlocks$, prevBlocks$
                      , goBlock$, block$, blockStatus$, blockTxs$, nextBlockTxs$, prevBlockTxs$, openBlock$
                      , mempool$, mempoolRecent$, feeEst$
@@ -241,7 +250,7 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
     , goHeight$.map(n       => ({ category: 'height',     method: 'GET', path: `/block-height/${n}` }))
 
     // push tx
-    , pushtx$.map(rawtx     => ({ category: 'pushtx',     method: 'GET', path: `/broadcast`, query: { tx: rawtx.replace(/\s+/g, '') } }))
+    , pushtx$.map(rawtx     => ({ category: 'pushtx',     method: 'POST', path: `/tx`, send: rawtx, type: 'text/plain' }))
 
     // fetch spending txs when viewing advanced details
     , openTx$.filter(notNully)
@@ -271,6 +280,13 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
     , !process.browser ? O.empty() : O.timer(0, 10000).withLatestFrom(view$).filter(([ _, view ]) => view == 'recentTxs' && document.hasFocus())
         .mapTo(                 { category: 'recent',     method: 'GET', path: '/mempool/recent', bg: true })
 
+
+    // elements/liquid only
+
+    // fetch asset map index on page load (once, as a foreground request)
+    , !process.env.ASSET_MAP_URL ? O.empty() : O.of(
+                                { category: 'asset-map',  method: 'GET', path: process.env.ASSET_MAP_URL })
+
     ).map(setBase)
 
   // DOM sink
@@ -295,6 +311,7 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
       , state$, view$, block$, blockTxs$, blocks$, tx$, txAnalysis$, spends$
       , tipHeight$, error$, loading$
       , query$, searchResult$, copy$, store$, navto$, scanning$, scan$
+      , assetMap$
       , req$, reply$: dropErrors(HTTP.select()).map(r => [ r.request.category, r.req.method, r.req.url, r.body||r.text, r ]) })
 
   // @XXX side-effects outside of drivers

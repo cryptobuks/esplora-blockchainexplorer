@@ -3,7 +3,7 @@ variables:
   CLOUD_SDK_VERSION: "218.0.0"
   DOCKER_DRIVER: overlay2
 
-image: blockstream/gcloud-docker@sha256:31c1a01d143558f0ba5677d121891a958fa600195679fe325980ec72e5264f2a
+image: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
 stages:
   - build
   - plan
@@ -82,7 +82,7 @@ plan:
     - branches@greenaddress/esplora
   stage: plan
   image:
-    name: blockstream/gcloud-docker@sha256:31c1a01d143558f0ba5677d121891a958fa600195679fe325980ec72e5264f2a
+    name: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
     entrypoint: [""]
   script:
     - (echo -n "$V2_PK" > terraform/modules/tor/v2.pk)
@@ -100,6 +100,7 @@ plan:
         -var "zones=$ZONES"
         -var "ssl_certs=$SSL_CERTS"
         -var "opsgenie_api_key=$OPSGENIE_API_KEY"
+        -var "image_source_project=$IMAGE_SOURCE_PROJECT"
         -input=false)
 
 deploy_main:
@@ -107,7 +108,7 @@ deploy_main:
     - schedules
   stage: deploy
   image:
-    name: blockstream/gcloud-docker@sha256:31c1a01d143558f0ba5677d121891a958fa600195679fe325980ec72e5264f2a
+    name: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
     entrypoint: [""]
   only:
     - /^main_v.*/
@@ -127,6 +128,7 @@ deploy_main:
         -var "zones=$ZONES"
         -var "ssl_certs=$SSL_CERTS"
         -var "opsgenie_api_key=$OPSGENIE_API_KEY"
+        -var "image_source_project=$IMAGE_SOURCE_PROJECT"
         -input=false -auto-approve)
 
 deploy_bitcoin_mainnet:
@@ -134,7 +136,7 @@ deploy_bitcoin_mainnet:
     - schedules
   stage: deploy
   image:
-    name: blockstream/gcloud-docker@sha256:31c1a01d143558f0ba5677d121891a958fa600195679fe325980ec72e5264f2a
+    name: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
     entrypoint: [""]
   only:
     - /^bitcoin_mainnet.*/
@@ -149,6 +151,7 @@ deploy_bitcoin_mainnet:
         -var "zones=$ZONES"
         -var "min_ready_sec=300"
         -var "initial_delay_sec=2400"
+        -var "image_source_project=$IMAGE_SOURCE_PROJECT"
         -input=false -auto-approve)
 
 deploy_bitcoin_testnet:
@@ -156,7 +159,7 @@ deploy_bitcoin_testnet:
     - schedules
   stage: deploy
   image:
-    name: blockstream/gcloud-docker@sha256:31c1a01d143558f0ba5677d121891a958fa600195679fe325980ec72e5264f2a
+    name: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
     entrypoint: [""]
   only:
     - /^bitcoin_testnet.*/
@@ -171,6 +174,7 @@ deploy_bitcoin_testnet:
         -var "zones=$ZONES"
         -var "min_ready_sec=60"
         -var "initial_delay_sec=600"
+        -var "image_source_project=$IMAGE_SOURCE_PROJECT"
         -input=false -auto-approve)
 
 deploy_liquid_mainnet:
@@ -178,7 +182,7 @@ deploy_liquid_mainnet:
     - schedules
   stage: deploy
   image:
-    name: blockstream/gcloud-docker@sha256:31c1a01d143558f0ba5677d121891a958fa600195679fe325980ec72e5264f2a
+    name: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
     entrypoint: [""]
   only:
     - /^liquid_mainnet.*/
@@ -193,23 +197,5 @@ deploy_liquid_mainnet:
         -var "zones=$ZONES"
         -var "min_ready_sec=120"
         -var "initial_delay_sec=1200"
-        -input=false -auto-approve)
-
-build_images:on-schedule:
-  only:
-    - schedules
-    - /^image_builder_v.*/
-  stage: deploy
-  image:
-    name: blockstream/gcloud-docker@sha256:31c1a01d143558f0ba5677d121891a958fa600195679fe325980ec72e5264f2a
-    entrypoint: [""]
-  script:
-    - (cd terraform && terraform init -input=false &&
-       terraform workspace select builders &&
-       terraform apply
-        -var "docker_tag_explorer=blockstream/esplora:$CI_COMMIT_SHA"
-        -var "cluster_size=$BUILDER_CLUSTER_SIZE"
-        -var "machine_type=$BUILDER_INSTANCE_TYPE"
-        -var "region=$BUILDER_REGION"
-        -var "zones=$BUILDER_ZONES"
+        -var "image_source_project=$IMAGE_SOURCE_PROJECT"
         -input=false -auto-approve)
