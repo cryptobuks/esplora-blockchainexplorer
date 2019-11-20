@@ -1,13 +1,13 @@
 FROM blockstream/esplora-base:latest AS build
 
-FROM debian:stretch@sha256:724b0fbbda7fda6372ffed586670573c59e07a48c86d606bab05db118abe0ef5
+FROM debian:buster@sha256:41f76363fd83982e14f7644486e1fb04812b3894aa4e396137c3435eaf05de88
 
 COPY --from=build /srv/explorer /srv/explorer
 COPY --from=build /root/.nvm /root/.nvm
 
 RUN apt-get -yqq update \
  && apt-get -yqq upgrade \
- && apt-get -yqq install nginx tor git curl pkg-config libcairo2-dev libjpeg-dev libgif-dev build-essential libpixman-1-dev runit python procps
+ && apt-get -yqq install nginx libnginx-mod-http-lua tor git curl runit procps socat gpg
 
 RUN mkdir -p /srv/explorer/static
 
@@ -40,7 +40,7 @@ RUN source /root/.nvm/nvm.sh \
 RUN cp /srv/explorer/source/run.sh /srv/explorer/
 
 # cleanup
-RUN apt-get --auto-remove remove -yqq --purge manpages git curl \
+RUN apt-get --auto-remove remove -yqq --purge manpages \
  && apt-get clean \
  && apt-get autoclean \
  && rm -rf /usr/share/doc* /usr/share/man /usr/share/postgresql/*/man /var/lib/apt/lists/* /var/cache/* /tmp/* /root/.cache /*.deb /root/.cargo

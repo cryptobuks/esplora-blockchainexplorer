@@ -121,6 +121,12 @@ Returns a list of all txids in the block.
 
 The response from this endpoint can be cached indefinitely.
 
+### `GET /block/:hash/txid/:index`
+
+Returns the transaction at index `:index` within the specified block.
+
+The response from this endpoint can be cached indefinitely.
+
 ### `GET /block-height/:height`
 
 Returns the hash of the block currently at `height`.
@@ -191,7 +197,54 @@ and the value is the estimated feerate (in sat/vB).
 
 The available confirmation targets are 2, 3, 4, 6, 10, 20, 144, 504 and 1008 blocks.
 
-For example: `{ 2: 36.183, 3: 34.841, 4: 34.841, 6: 34.841, 10: 22.164, 20: 9.692, 144: 1, 501: 1, 1008:1 }`
+For example: `{ "2": 87.882, "3": 87.882, "4": 87.882, "6": 68.285, "10": 1.027, "20": 1.027, "144": 1.027, "504": 1.027, "1008": 1.027 }`
+
+## Issued assets (Elements/Liquid only)
+
+### `GET /asset/:asset_id`
+
+Get information about an issued asset. Returns an object with:
+
+- `asset_id`
+- `issuance_txin`: the issuance transaction input
+  - `txid`
+  - `vin`
+- `issuance_prevout`: the previous output spent for the issuance
+  - `txid`
+  - `vout`
+- `status`: the confirmation status of the initial asset issuance transaction
+- `contract_hash`: the contract hash committed as the issuance entropy
+- `reissuance_token`: the asset id of the reissuance token
+- `chain_stats` and `mempool_stats`
+  - `tx_count`: the number of transactions associated with this asset (does not include confidential transactions)
+  - `issuance_count`: the number of (re)issuance transactions
+  - `issued_amount`: the total known amount issued (should be considered a minimum bound when `has_blinded_issuances` is true)
+  - `burned_amount`: the total amount provably burned
+  - `has_blinded_issuances`: whether at least one of the (re)issuances were blind
+  - `reissuance_tokens`: the number of reissuance tokens
+  - `burned_reissuance_tokens`: the number of reissuance tokens burned
+
+If the asset is available on the registry, the following fields are returned as well:
+
+- `contract`: the full json contract json committed in the issuance
+- `entity`: the entity linked to this asset. the only available type is currently `domain`, which is encoded as `{ "domain": "foobar.com>" }` (required)
+- `ticker`: a 3-5 characters ticker associated with the asset (optional)
+- `precision`: the number of decimal places for units of this asset (defaults to 0)
+- `name`: a description for the asset (up to 255 characters)
+
+Example:
+
+```
+{"asset_id":"4d4354944366ea1e33f27c37fec97504025d6062c551208f68597d1ed40ec53e","contract":{"entity":{"domain":"magicalcryptofriends.com"},"issuer_pubkey":"02d2b29fe8ffef6acb5e75d0cd7f9c55d502bd876434b87c39ae209fc57c57f52a","name":"Magical Crypto Token","nonce":"13158145","precision":0,"ticker":"MCT","version":0},"issuance_txin":{"txid":"d535ded7ce07a0bb9c61d0fefff8127da3fc4833302b05e2b8a0cf9e04446af1","vin":0},"issuance_prevout":{"txid":"839e819d74ac98110fce63a3dab3a1075bbddcad811e0e125641989581919ab0","vout":1},"name":"Magical Crypto Token","ticker":"MCT","precision":0,"entity":{"domain":"magicalcryptofriends.com"}}
+```
+
+### `GET /asset/:asset_id/txs`
+### `GET /asset/:asset_id/txs/mempool`
+### `GET /asset/:asset_id/txs/chain[/:last_seen]`
+
+Returns the list of (re)issuance and burn transactions associated with this asset id.
+
+Does not include regular transactions transferring this asset.
 
 ## Transaction format
 
@@ -215,9 +268,12 @@ For example: `{ 2: 36.183, 3: 34.841, 4: 34.841, 6: 34.841, 10: 22.164, 20: 9.69
   - *(Elements only)*
   - `is_pegin`
   - `issuance` (available for asset issuance transactions, `null` otherwise)
+    - `asset_id`
     - `is_reissuance`
+    - `asset_id`
     - `asset_blinding_nonce`
     - `asset_entropy`
+    - `contract_hash`
     - `assetamount` or `assetamountcommitment`
     - `tokenamount` or `tokenamountcommitment`
 - `vout[]`

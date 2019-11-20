@@ -1,5 +1,5 @@
 import Snabbdom from 'snabbdom-pragma'
-import { linkToParentOut, formatOutAmount, formatSat, formatHex, linkToAddr } from './util'
+import { linkToParentOut, formatOutAmount, formatAssetAmount, formatHex, linkToAddr, formatNumber } from './util'
 
 const layout = (vin, desc, body, { t, index, query={}, ...S }) =>
   <div class={{ vin: true, selected: !!query[`input:${index}`] }}>
@@ -41,38 +41,42 @@ const standard = (vin, { isOpen, t, ...S }, assetMeta=getAssetMeta(vin, S)) => l
         <div>{vin.issuance.is_reissuance ? t`Reissuance` : t`New asset`}</div>
       </div>
 
-    , vin.issuance.asset_id &&
-        <div className="vin-body-row">
-          <div>{t`Issued asset id`}</div>
-          <div className="mono">{vin.issuance.asset_id}</div>
-        </div>
-
-    , vin.issuance.asset_entropy &&
-        <div className="vin-body-row">
-          <div>{t`Issuance contract hash`}</div>
-          <div className="mono">{vin.issuance.asset_entropy}</div>
-        </div>
-
     , <div className="vin-body-row">
-        <div>{!vin.issuance.assetamountcommitment ? t`Issued amount` : t`Amount commitment`}</div>
-        <div>{!vin.issuance.assetamountcommitment ? formatIssuedAmount(vin.issuance, { t, ...S })
-                                                  : <span className="mono">{vin.issuance.assetamountcommitment}</span>}</div>
+        <div>{t`Issued asset id`}</div>
+        <div className="mono"><a href={`asset/${vin.issuance.asset_id}`}>{vin.issuance.asset_id}</a></div>
       </div>
-
-    , !vin.issuance.is_reissuance &&
-        <div className="vin-body-row">
-          <div>{!vin.issuance.tokenamountcommitment ? t`Reissuance keys` : t`Reissuance commitment`}</div>
-          <div>{!vin.issuance.tokenamountcommitment ? (!vin.issuance.tokenamount ? t`No reissuance` : vin.issuance.tokenamount)
-                                                    : <span className="mono">{vin.issuance.tokenamountcommitment}</span>}</div>
-        </div>
 
     , assetMeta && (([ domain, ticker, name, precision ] = assetMeta) =>
         <div className="vin-body-row">
           <div>{t`Asset name`}</div>
           <div>
             {domain} {ticker} { name ? `(${name})` : '' }
-        </div>
+          </div>
         </div>)()
+
+    , vin.issuance.contract_hash &&
+        <div className="vin-body-row">
+          <div>{t`Contract hash`}</div>
+          <div className="mono">{vin.issuance.contract_hash}</div>
+        </div>
+
+    , <div className="vin-body-row">
+        <div>{t`Asset entropy`}</div>
+        <div className="mono">{vin.issuance.asset_entropy}</div>
+      </div>
+
+    , <div className="vin-body-row">
+        <div>{!vin.issuance.assetamountcommitment ? t`Issued amount` : t`Amount commitment`}</div>
+        <div>{!vin.issuance.assetamountcommitment ? formatAssetAmount(vin.issuance.assetamount, assetMeta ? assetMeta[3] : 0, t)
+                                                  : <span className="mono">{vin.issuance.assetamountcommitment}</span>}</div>
+      </div>
+
+    , !vin.issuance.is_reissuance &&
+        <div className="vin-body-row">
+          <div>{!vin.issuance.tokenamountcommitment ? t`Reissuance tokens` : t`Reissuance tokens commitment`}</div>
+          <div>{!vin.issuance.tokenamountcommitment ? (!vin.issuance.tokenamount ? t`No reissuance` : formatNumber(vin.issuance.tokenamount))
+                                                    : <span className="mono">{vin.issuance.tokenamountcommitment}</span>}</div>
+        </div>
 
     , vin.issuance.asset_blinding_nonce &&
         <div className="vin-body-row">
@@ -95,7 +99,7 @@ const standard = (vin, { isOpen, t, ...S }, assetMeta=getAssetMeta(vin, S)) => l
 
     { vin.witness && <div className="vin-body-row">
       <div>{t`Witness`}</div>
-      <div className="mono">{vin.witness.join(' ')}</div>
+      <div className="mono">{vin.witness.map(wit => [ ' ', wit.length ? wit : <em>&lt;empty&gt;</em> ])}</div>
     </div> }
 
     { vin.inner_redeemscript_asm && <div className="vin-body-row">
@@ -132,13 +136,6 @@ const standard = (vin, { isOpen, t, ...S }, assetMeta=getAssetMeta(vin, S)) => l
   </div>
 , { t, ...S }
 )
-
-const formatIssuedAmount = (issuance, S) =>
-  // look up the asset name/precision when the issued asset id is known
-  issuance.asset_id
-    ? formatOutAmount({ value: issuance.assetamount, asset: issuance.asset_id }, S, true)
-  // otherwise, use the default precision of 8
-    : formatSat(issuance.assetamount, '')
 
 export default (vin, opt) =>
   vin.is_pegin ? pegin(vin, opt)

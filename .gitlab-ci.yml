@@ -1,9 +1,13 @@
 variables:
   CI_DISPOSABLE_ENVIRONMENT: "true"
-  CLOUD_SDK_VERSION: "218.0.0"
   DOCKER_DRIVER: overlay2
+  DOCKER_HOST: tcp://localhost:2375
+  DOCKER_TLS_CERTDIR: ""
 
-image: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
+services:
+  - docker:19-dind
+
+image: blockstream/gcloud-docker@sha256:f6e933f2407d6405317c0fdca5db707c5396f5d4a879a2c17338eda158a0cc87
 stages:
   - build
   - plan
@@ -19,10 +23,11 @@ before_script:
   - echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USER" --password-stdin
 
 test_docker_build_image:
-  except:
-    - schedules
-  image: docker@sha256:f7211e1779c82e3a50d0d6f165e83f3e2be217a234b0181d5e8bee411d8fcc5f
+  image: docker@sha256:16a1f4b3e64c5a8e1ac80987bc2b8907dbc1c79c1b13be0781f4d24a2072e698
   stage: build
+  tags:
+    - docker
+    - k8s
   before_script:
     - echo "Disabling before script"
   except:
@@ -36,7 +41,6 @@ test_docker_build_image:
         -f Dockerfile.deps
         -t esplora-base .
     - docker build
-        --squash
         --build-arg FOOT_HTML='<!-- '"$CI_COMMIT_SHA"'-->'
         --cache-from blockstream/esplora:latest
         -t esplora .
@@ -45,13 +49,16 @@ test_docker_build_image:
 
 build:
   stage: build
+  tags:
+    - docker
+    - k8s
   only:
     - /^bitcoin_mainnet.*/
     - /^bitcoin_testnet.*/
     - /^liquid_mainnet.*/
     - master@greenaddress/esplora
   script:
-    - docker pull debian:stretch || true
+    - docker pull debian:buster || true
     - docker pull blockstream/esplora-base:latest || true
     - docker build --cache-from blockstream/esplora-base:latest -t blockstream/esplora-base:$CI_COMMIT_REF_SLUG -t blockstream/esplora-base:latest -f Dockerfile.deps .
     - docker push blockstream/esplora-base:latest
@@ -65,7 +72,6 @@ build:
           -t blockstream/esplora:latest .
         && docker push blockstream/esplora:latest
         && docker build
-          --squash
           --build-arg FOOT_HTML='<!-- '"$CI_COMMIT_SHA"' -->'
           --cache-from blockstream/esplora:latest
           -t blockstream/esplora:$CI_COMMIT_SHA .
@@ -77,13 +83,9 @@ plan:
     - /^bitcoin_testnet.*/
     - /^liquid_mainnet.*/
     - master@greenaddress/esplora
-    - schedules
   only:
     - branches@greenaddress/esplora
   stage: plan
-  image:
-    name: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
-    entrypoint: [""]
   script:
     - (echo -n "$V2_PK" > terraform/modules/tor/v2.pk)
     - (echo -n "$V3_PK" > terraform/modules/tor/v3.pk)
@@ -96,6 +98,32 @@ plan:
         -var "hosts_onion=$HOSTS_ONION"
         -var "cluster_size=$NODE_CLUSTER_SIZE"
         -var "instance_type=$NODE_INSTANCE_TYPE"
+        -var "preemptible_instance_type=$NODE_PREEMPTIBLE_INSTANCE_TYPE"
+        -var "regions=$REGIONS"
+        -var "zones=$ZONES"
+        -var "ssl_certs=$SSL_CERTS"
+        -var "opsgenie_api_key=$OPSGENIE_API_KEY"
+        -var "image_source_project=$IMAGE_SOURCE_PROJECT"
+        -input=false)
+
+plan_main:
+  stage: deploy
+  only:
+    - master@greenaddress/esplora
+    - /^main_v.*/
+  script:
+    - (echo -n "$V2_PK" > terraform/modules/tor/v2.pk)
+    - (echo -n "$V3_PK" > terraform/modules/tor/v3.pk)
+    - (echo -n "$V3_PUBK" > terraform/modules/tor/v3.pubk)
+    - (cd terraform && terraform init -input=false &&
+       terraform workspace select main &&
+       terraform plan
+        -var "prometheus_allowed_source_ip=$PROMETHEUS_ALLOWED_SOURCE_IP"
+        -var "hosts=$HOSTS"
+        -var "hosts_onion=$HOSTS_ONION"
+        -var "cluster_size=$NODE_CLUSTER_SIZE"
+        -var "instance_type=$NODE_INSTANCE_TYPE"
+        -var "preemptible_instance_type=$NODE_PREEMPTIBLE_INSTANCE_TYPE"
         -var "regions=$REGIONS"
         -var "zones=$ZONES"
         -var "ssl_certs=$SSL_CERTS"
@@ -104,13 +132,10 @@ plan:
         -input=false)
 
 deploy_main:
-  except:
-    - schedules
+  when: manual
   stage: deploy
-  image:
-    name: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
-    entrypoint: [""]
   only:
+    - master@greenaddress/esplora
     - /^main_v.*/
   script:
     - (echo -n "$V2_PK" > terraform/modules/tor/v2.pk)
@@ -124,6 +149,7 @@ deploy_main:
         -var "hosts_onion=$HOSTS_ONION"
         -var "cluster_size=$NODE_CLUSTER_SIZE"
         -var "instance_type=$NODE_INSTANCE_TYPE"
+        -var "preemptible_instance_type=$NODE_PREEMPTIBLE_INSTANCE_TYPE"
         -var "regions=$REGIONS"
         -var "zones=$ZONES"
         -var "ssl_certs=$SSL_CERTS"
@@ -131,71 +157,149 @@ deploy_main:
         -var "image_source_project=$IMAGE_SOURCE_PROJECT"
         -input=false -auto-approve)
 
-deploy_bitcoin_mainnet:
-  except:
-    - schedules
+plan_bitcoin_mainnet:
   stage: deploy
-  image:
-    name: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
-    entrypoint: [""]
   only:
     - /^bitcoin_mainnet.*/
   script:
+    - (cd terraform && terraform init -input=false &&
+       terraform workspace select bitcoin-mainnet &&
+       terraform plan
+        -var "docker_tag_explorer=blockstream/esplora:$CI_COMMIT_SHA"
+        -var "cluster_size=$NODE_CLUSTER_SIZE"
+        -var "instance_type=$NODE_INSTANCE_TYPE"
+        -var "preemptible_instance_type=$NODE_PREEMPTIBLE_INSTANCE_TYPE"
+        -var "regions=$REGIONS"
+        -var "zones=$ZONES"
+        -var "min_ready_sec=300"
+        -var "initial_delay_sec=1200"
+        -var "image_source_project=$IMAGE_SOURCE_PROJECT"
+        -var "mempooldat=$MEMPOOLDAT"
+        -var "fullurl=https://blockstream.info/_sync/mempool"
+        -input=false)
+
+deploy_bitcoin_mainnet:
+  when: manual
+  stage: deploy
+  tags:
+    - docker
+    - k8s
+  only:
+    - /^bitcoin_mainnet.*/
+  script:
+    - docker pull blockstream/esplora:$CI_COMMIT_SHA
+    - docker tag blockstream/esplora:$CI_COMMIT_SHA blockstream/esplora:builder-bitcoin-mainnet
+    - docker push blockstream/esplora:builder-bitcoin-mainnet
     - (cd terraform && terraform init -input=false &&
        terraform workspace select bitcoin-mainnet &&
        terraform apply
         -var "docker_tag_explorer=blockstream/esplora:$CI_COMMIT_SHA"
         -var "cluster_size=$NODE_CLUSTER_SIZE"
         -var "instance_type=$NODE_INSTANCE_TYPE"
+        -var "preemptible_instance_type=$NODE_PREEMPTIBLE_INSTANCE_TYPE"
         -var "regions=$REGIONS"
         -var "zones=$ZONES"
         -var "min_ready_sec=300"
-        -var "initial_delay_sec=2400"
+        -var "initial_delay_sec=1200"
         -var "image_source_project=$IMAGE_SOURCE_PROJECT"
+        -var "mempooldat=$MEMPOOLDAT"
+        -var "fullurl=https://blockstream.info/_sync/mempool"
         -input=false -auto-approve)
 
-deploy_bitcoin_testnet:
-  except:
-    - schedules
+plan_bitcoin_testnet:
   stage: deploy
-  image:
-    name: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
-    entrypoint: [""]
   only:
     - /^bitcoin_testnet.*/
   script:
+    - (cd terraform && terraform init -input=false &&
+       terraform workspace select bitcoin-testnet &&
+       terraform plan
+        -var "docker_tag_explorer=blockstream/esplora:$CI_COMMIT_SHA"
+        -var "cluster_size=$NODE_CLUSTER_SIZE"
+        -var "instance_type=$NODE_INSTANCE_TYPE"
+        -var "preemptible_instance_type=$NODE_PREEMPTIBLE_INSTANCE_TYPE"
+        -var "regions=$REGIONS"
+        -var "zones=$ZONES"
+        -var "min_ready_sec=60"
+        -var "initial_delay_sec=600"
+        -var "image_source_project=$IMAGE_SOURCE_PROJECT"
+        -var "mempooldat=$MEMPOOLDAT"
+        -var "fullurl=https://blockstream.info/testnet/_sync/mempool"
+        -input=false)
+
+deploy_bitcoin_testnet:
+  when: manual
+  stage: deploy
+  tags:
+    - docker
+    - k8s
+  only:
+    - /^bitcoin_testnet.*/
+  script:
+    - docker pull blockstream/esplora:$CI_COMMIT_SHA
+    - docker tag blockstream/esplora:$CI_COMMIT_SHA blockstream/esplora:builder-bitcoin-testnet
+    - docker push blockstream/esplora:builder-bitcoin-testnet
     - (cd terraform && terraform init -input=false &&
        terraform workspace select bitcoin-testnet &&
        terraform apply
         -var "docker_tag_explorer=blockstream/esplora:$CI_COMMIT_SHA"
         -var "cluster_size=$NODE_CLUSTER_SIZE"
         -var "instance_type=$NODE_INSTANCE_TYPE"
+        -var "preemptible_instance_type=$NODE_PREEMPTIBLE_INSTANCE_TYPE"
         -var "regions=$REGIONS"
         -var "zones=$ZONES"
         -var "min_ready_sec=60"
         -var "initial_delay_sec=600"
         -var "image_source_project=$IMAGE_SOURCE_PROJECT"
+        -var "mempooldat=$MEMPOOLDAT"
+        -var "fullurl=https://blockstream.info/testnet/_sync/mempool"
         -input=false -auto-approve)
 
-deploy_liquid_mainnet:
-  except:
-    - schedules
+plan_liquid_mainnet:
   stage: deploy
-  image:
-    name: blockstream/gcloud-docker@sha256:2e20abd14c17685224e8504a4cc4121f6189bee1b7dae14c267af3ee8b712bd7
-    entrypoint: [""]
   only:
     - /^liquid_mainnet.*/
   script:
+    - (cd terraform && terraform init -input=false &&
+       terraform workspace select liquid-mainnet &&
+       terraform plan
+        -var "docker_tag_explorer=blockstream/esplora:$CI_COMMIT_SHA"
+        -var "cluster_size=$NODE_CLUSTER_SIZE"
+        -var "instance_type=$NODE_INSTANCE_TYPE"
+        -var "preemptible_instance_type=$NODE_PREEMPTIBLE_INSTANCE_TYPE"
+        -var "regions=$REGIONS"
+        -var "zones=$ZONES"
+        -var "min_ready_sec=60"
+        -var "initial_delay_sec=900"
+        -var "image_source_project=$IMAGE_SOURCE_PROJECT"
+        -var "mempooldat=$MEMPOOLDAT"
+        -var "fullurl=https://blockstream.info/liquid/_sync/mempool"
+        -input=false)
+
+deploy_liquid_mainnet:
+  when: manual
+  stage: deploy
+  tags:
+    - docker
+    - k8s
+  only:
+    - /^liquid_mainnet.*/
+  script:
+    - docker pull blockstream/esplora:$CI_COMMIT_SHA
+    - docker tag blockstream/esplora:$CI_COMMIT_SHA blockstream/esplora:builder-liquid-mainnet
+    - docker push blockstream/esplora:builder-liquid-mainnet
     - (cd terraform && terraform init -input=false &&
        terraform workspace select liquid-mainnet &&
        terraform apply
         -var "docker_tag_explorer=blockstream/esplora:$CI_COMMIT_SHA"
         -var "cluster_size=$NODE_CLUSTER_SIZE"
         -var "instance_type=$NODE_INSTANCE_TYPE"
+        -var "preemptible_instance_type=$NODE_PREEMPTIBLE_INSTANCE_TYPE"
         -var "regions=$REGIONS"
         -var "zones=$ZONES"
-        -var "min_ready_sec=120"
-        -var "initial_delay_sec=1200"
+        -var "min_ready_sec=60"
+        -var "initial_delay_sec=900"
         -var "image_source_project=$IMAGE_SOURCE_PROJECT"
+        -var "mempooldat=$MEMPOOLDAT"
+        -var "fullurl=https://blockstream.info/liquid/_sync/mempool"
         -input=false -auto-approve)

@@ -4,3 +4,6 @@ README.md
 Dockerfile
 .gitlab-ci.yml
 terraform
+node_modules
+client/node_modules
+*_datadir/

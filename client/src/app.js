@@ -4,7 +4,7 @@ import { Observable as O } from './rxjs'
 import { getMempoolDepth, getConfEstimate, calcSegwitFeeGains } from './lib/fees'
 import getPrivacyAnalysis from './lib/privacy-analysis'
 import { blockTxsPerPage, blocksPerPage } from './const'
-import { dbg, combine, extractErrors, dropErrors, last, updateQuery, notNully, tryUnconfidentialAddress, parseHashes, isHash256 } from './util'
+import { dbg, combine, extractErrors, dropErrors, last, updateQuery, notNully, tryUnconfidentialAddress, parseHashes, isHash256, makeAddressQR } from './util'
 import l10n, { defaultLang } from './l10n'
 import * as views from './views'
 
@@ -15,7 +15,7 @@ if (process.browser) {
 const apiBase = (process.env.API_URL || '/api').replace(/\/+$/, '')
     , setBase = ({ path, ...r }) => ({ ...r, url: path.includes('://') ? path : apiBase + path })
 
-const reservedPaths = [ 'mempool' ]
+const reservedPaths = [ 'mempool', 'assets' ]
 
 // Temporary bug workaround. Listening with on('form.search', 'submit') was unable
 // to catch some form submissions.
@@ -34,9 +34,10 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
   , goHome$   = route('/').map(loc => ({ start_height: loc.query.start != null ? +loc.query.start : null }))
   , goBlock$  = route('/block/:hash').map(loc => ({ hash: loc.params.hash, start_index: +loc.query.start || 0 }))
   , goHeight$ = route('/block-height/:height').map(loc => loc.params.height)
-  , goAddr$   = route('/address/:addr').map(loc => ({ addr: tryUnconfidentialAddress(loc.params.addr)
-                                                    , last_txids: parseHashes(loc.query.txids)
-                                                    , est_chain_seen_count: +loc.query.c || 0 }))
+  , goAddr$   = route('/address/:addr').map(loc => ({
+      addr: tryUnconfidentialAddress(loc.params.addr)
+    , last_txids: parseHashes(loc.query.txids)
+    , est_chain_seen_count: +loc.query.c || 0 }))
   , goTx$     = route('/tx/:txid').map(loc => loc.params.txid).filter(isHash256)
   , goPush$   = route('/tx/push')
   , goRecent$ = route('/tx/recent')
@@ -45,6 +46,14 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
   , goSearch$ = route('/:q([a-zA-Z0-9]+)').map(loc => loc.params.q === 'search' ? loc.query.q : loc.params.q)
       .filter(q => !reservedPaths.includes(q))
       .merge(scan$)
+
+  , goAsset$  = !process.env.ISSUED_ASSETS ? O.empty() : route('/asset/:asset_id').map(loc => ({
+      asset_id: loc.params.asset_id
+    , last_txids: parseHashes(loc.query.txids)
+    , est_chain_seen_count: +loc.query.c || 0
+    }))
+
+  , goAssetList$ = !process.env.ISSUED_ASSETS || !process.env.ASSET_MAP_URL ? O.empty() : route('/assets')
 
   // auto-expand when opening with "#expand"
   , expandTx$ = route('/tx/:txid').filter(loc => loc.query.expand).map(loc => loc.params.txid)
@@ -64,6 +73,7 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
   , moreBlocks$ = click('[data-loadmore-block-height]').map(d => ({ start_height: d.loadmoreBlockHeight }))
   , moreBTxs$   = click('[data-loadmore-txs-block]').map(d => ({ block: d.loadmoreTxsBlock, start_index: d.loadmoreTxsIndex }))
   , moreATxs$   = click('[data-loadmore-txs-addr]').map(d => ({ addr: d.loadmoreTxsAddr, last_txid: d.loadmoreTxsLastTxid }))
+  , moreSTxs$   = click('[data-loadmore-txs-asset]').map(d => ({ asset_id: d.loadmoreTxsAsset, last_txid: d.loadmoreTxsLastTxid }))
 
   , lang$ = storage.local.getItem('lang').first().map(lang => lang || defaultLang)
       .concat(on('select[name=lang]', 'input').map(e => e.target.value))
@@ -126,9 +136,10 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
 
   // Address and associated txs
   , addr$ = reply('address').merge(goAddr$.mapTo(null))
+  , addrQR$ = addr$.flatMap(addr => addr ? makeAddressQR(addr.address) : [])
   , addrTxs$ = O.merge(
       reply('addr-txs').map(txs => S => txs)
-    , reply('addr-txs-chain').map(txs => S => [ ...S, ...txs ])
+    , reply('addr-txs-more').map(txs => S => [ ...S, ...txs ])
     , goAddr$.map(_ => S => null)
     ).startWith(null).scan((S, mod) => mod(S))
 
@@ -168,8 +179,19 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
       , overpaying: !tx.status.confirmed && feerate != null && feeEst && feeEst[2] != null ? feerate/feeEst[2] : null
       }))
 
+  // Asset and associated txs (elements only)
+  , asset$ = !process.env.ISSUED_ASSETS ? O.empty() : reply('asset').merge(goAsset$.mapTo(null))
+  , assetTxs$ = !process.env.ISSUED_ASSETS ? O.empty() : O.merge(
+      reply('asset-txs').map(txs => S => txs)
+    , reply('asset-txs-more').map(txs => S => [ ...S, ...txs ])
+    , goAsset$.map(_ => S => null)
+    ).startWith(null).scan((S, mod) => mod(S))
+
   // Asset map (elements only)
-  , assetMap$ = process.env.ASSET_MAP_URL ? reply('asset-map') : O.of({})
+  , assetMap$ = !process.env.ASSET_MAP_URL ? O.of({}) :
+      reply('asset-map')
+        // use an empty object if the map fails loading for any reason
+        .merge(extractErrors(HTTP.select('asset-map')).mapTo({}))
 
   // The minimally required data to start rendering the UI
   // In elements, we block rendering until the assetMap is loaded. Otherwise, we can start immediately.
@@ -182,9 +204,11 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
                   , block$.filter(notNully).mapTo('block')
                   , tx$.filter(notNully).mapTo('tx')
                   , addr$.filter(notNully).mapTo('addr')
+                  , asset$.filter(notNully).mapTo('asset')
                   , goPush$.mapTo('pushtx')
                   , goScan$.mapTo('scan')
                   , goMempool$.mapTo('mempool')
+                  , goAssetList$.mapTo('assetList')
                   , error$.mapTo('error'))
       .combineLatest(isReady$, loading$, (view, isReady, loading) =>
         !isReady ? 'loading' : view || (loading ? 'loading' : 'notFound'))
@@ -194,18 +218,21 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
                    , block$.filter(notNully).withLatestFrom(t$, (block, t) => t`Block #${block.height}: ${block.id}`)
                    , tx$.filter(notNully).withLatestFrom(t$, (tx, t) => t`Transaction: ${tx.txid}`)
                    , addr$.filter(notNully).withLatestFrom(t$, (addr, t) => t`Address: ${addr.address}`)
+                   , asset$.filter(notNully).withLatestFrom(t$, (asset, t) => t`Asset: ${asset.asset_id}`)
+                   , goAssetList$.withLatestFrom(t$, (_, t) => t`Registered assets`)
                    , goPush$.withLatestFrom(t$, (_, t) => t`Broadcast transaction`)
                    , goMempool$.withLatestFrom(t$, (_, t) => t`Mempool`)
                    , goRecent$.withLatestFrom(t$, (_, t) => t`Recent transactions`))
 
   // App state
-  , state$ = combine({ t$, error$, tipHeight$, spends$, assetMap$
+  , state$ = combine({ t$, error$, tipHeight$, spends$
                      , goHome$, blocks$, nextBlocks$, prevBlocks$
                      , goBlock$, block$, blockStatus$, blockTxs$, nextBlockTxs$, prevBlockTxs$, openBlock$
                      , mempool$, mempoolRecent$, feeEst$
                      , tx$, txAnalysis$, openTx$
-                     , goAddr$, addr$, addrTxs$
-                     , loading$, page$, view$, title$, theme$
+                     , goAddr$, addr$, addrTxs$, addrQR$
+                     , assetMap$, goAsset$, asset$, assetTxs$
+                     , isReady$, loading$, page$, view$, title$, theme$
                      })
 
   // Update query options with ?expand
@@ -244,7 +271,7 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
     , moreBTxs$.map(d       => ({ category: 'block-txs',  method: 'GET', path: `/block/${d.block}/txs/${d.start_index}` }))
 
     // fetch more txs for address page
-    , moreATxs$.map(d       => ({ category: 'addr-txs-chain', method: 'GET', path: `/address/${d.addr}/txs/chain/${d.last_txid}` }))
+    , moreATxs$.map(d       => ({ category: 'addr-txs-more', method: 'GET', path: `/address/${d.addr}/txs/chain/${d.last_txid}` }))
 
     // fetch block by height
     , goHeight$.map(n       => ({ category: 'height',     method: 'GET', path: `/block-height/${n}` }))
@@ -258,7 +285,7 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
 
     // in browser env, get the tip every 30s (but only when the page is active) or when we render a block/tx/addr, but not more than once every 5s
     // in server env, just get it once
-    , (process.browser ? O.merge(O.timer(0, 30000).filter(() => document.hasFocus()), goBlock$, goTx$, goAddr$).throttleTime(5000)
+    , (process.browser ? O.merge(O.timer(0, 30000).filter(() => document.hasFocus()), goBlock$, goTx$, goAddr$).startWith(1).throttleTime(5000)
                        : O.of(1)
         ).mapTo(                { category: 'tip-height', method: 'GET', path: '/blocks/tip/height', bg: !!process.browser } )
 
@@ -281,11 +308,23 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
         .mapTo(                 { category: 'recent',     method: 'GET', path: '/mempool/recent', bg: true })
 
 
+    //
     // elements/liquid only
+    //
 
     // fetch asset map index on page load (once, as a foreground request)
     , !process.env.ASSET_MAP_URL ? O.empty() : O.of(
-                                { category: 'asset-map',  method: 'GET', path: process.env.ASSET_MAP_URL })
+                                { category: 'asset-map',  method: 'GET', path: process.env.ASSET_MAP_URL, bg: true })
+
+    // fetch asset and its txs
+    , !process.env.ISSUED_ASSETS ? O.empty() :
+        goAsset$.flatMap(d  => [{ category: 'asset',      method: 'GET', path: `/asset/${d.asset_id}` }
+                              , d.last_txids.length
+                              ? { category: 'asset-txs',  method: 'GET', path: `/asset/${d.asset_id}/txs/chain/${last(d.last_txids)}` }
+                              : { category: 'asset-txs',  method: 'GET', path: `/asset/${d.asset_id}/txs` }])
+
+    // fetch more txs for asset page
+    , moreSTxs$.map(d       => ({ category: 'asset-txs-more', method: 'GET', path: `/asset/${d.asset_id}/txs/chain/${d.last_txid}` }))
 
     ).map(setBase)
 
@@ -300,10 +339,11 @@ export default function main({ DOM, HTTP, route, storage, scanner: scan$, search
 
   // Route navigation sink
   , navto$ = O.merge(
-      searchResult$.filter(Boolean).map(path => ({ type: 'push', pathname: path }))
+      searchResult$.filter(Boolean).map(result => ({ type: 'push', ...result }))
     , byHeight$.map(hash => ({ type: 'replace', pathname: `/block/${hash}` }))
-    , updateQuery$.map(([ pathname, qs ]) => ({ type: 'replace', pathname: pathname+qs, state: { noRouting: true } }))
     , pushedtx$.map(txid => ({ type: 'push', pathname: `/tx/${txid}` }))
+    // XXX: replace still uses a single string with the search query (https://github.com/cyclejs/cyclejs/pull/890#issuecomment-542413707)
+    , updateQuery$.map(([ pathname, qs ]) => ({ type: 'replace', pathname: pathname+qs, state: { noRouting: true } }))
   )
 
   dbg({ goHome$, goBlock$, goTx$, togTx$, page$, lang$, vdom$
